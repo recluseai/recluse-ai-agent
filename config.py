@@ -1,5 +1,9 @@
-# config.py
-CONSUMER_KEY = "your_consumer_key"
-CONSUMER_SECRET = "your_consumer_secret"
-ACCESS_TOKEN = "your_access_token"
-ACCESS_TOKEN_SECRET = "your_access_token_secret"
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+CONSUMER_KEY = os.getenv("CONSUMER_KEY")
+CONSUMER_SECRET = os.getenv("CONSUMER_SECRET")
+ACCESS_TOKEN = os.getenv("ACCESS_TOKEN")
+ACCESS_TOKEN_SECRET = os.getenv("ACCESS_TOKEN_SECRET")

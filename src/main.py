@@ -1,9 +1,10 @@
 from typing import Union
 from fastapi import FastAPI
-from config import ACCESS_TOKEN, ACCESS_TOKEN_SECRET, CONSUMER_KEY,CONSUMER_SECRET
 import tweepy
+from config import CONSUMER_SECRET, CONSUMER_KEY, ACCESS_TOKEN, ACCESS_TOKEN_SECRET
 
 app = FastAPI()
+
 
 auth = tweepy.OAuth1UserHandler(
     CONSUMER_KEY, CONSUMER_SECRET, ACCESS_TOKEN, ACCESS_TOKEN_SECRET
