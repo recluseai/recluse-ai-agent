@@ -10,6 +10,7 @@ from tweepy import Client
 from typing import Union
 from aiolimiter import AsyncLimiter
 
+import datetime
 import logging
 import time
 import openai
@@ -63,6 +64,27 @@ def read_root():
     return {"message": "Welcome to the Twitter AI Agent!"}
 
 
+# twitter mentions function
+@app.post("/mentions/{username}")
+async def read_mentions(username: str):
+    """
+    Fetches the latest mentions for RecluseAI.
+    """
+    try:
+        async with rate_limiter:
+            today = datetime.time()
+            print(f"Today's date and time: {today}")
+            print(f"This is the user username: {username}")
+            user = client.get_user(username=username)
+            print(f"This is the user id: {user.data["id"]}")
+            mentions = client.get_users_mentions(id=user.data["id"])
+            print(f"This is the user mentions: {mentions}")
+            tweets = [{"id": mention.id, "text": mention.text, "user": mention.user.screen_name} for mention in mentions]
+            return {"status": "success", "mentions": tweets}
+    except Exception as e:
+        logger.error(f"Error fetching mentions: {e}")
+        raise HTTPException(status_code=500, detail="Error fetching mentions")
+    
 # twitter tweet functions
 
 @app.post("/tweet")

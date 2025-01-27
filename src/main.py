@@ -1,63 +1,112 @@
-# Import relevant functionality
+import asyncio
+import traceback
 from langchain_openai import ChatOpenAI
-from langchain_community.tools.tavily_search import TavilySearchResults
 from langchain_core.messages import HumanMessage
-from langchain_core.tools import tool
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.prebuilt import create_react_agent
-from langchain_openai import ChatOpenAI
-from .twitter_functions import fetch
-# config
-from config import (
-    OPENAI_API_KEY,
-    TAVILY_API_KEY,
+
+# relative imports
+from src.agent_personality import get_system_message
+from src.twitter_functions import (
+    fetch_10_recent_tweets,
+    reply_to_tweet,
+    retweet_tweet,
 )
+from src.agent_tools import search_by_user_context, search_for_info
+from src.config import OPENAI_API_KEY
 
-import asyncio
+from fastapi import FastAPI
 
-# local
-from .agent_personality import personality_message
-from  agent_tools import tools, search_by_user_context,search_for_info
+app = FastAPI()
 
-
+# Configure AI model and memory
 model = ChatOpenAI(
-    model_name="gpt-3.5-turbo", openai_api_key=OPENAI_API_KEY
-).with_config({"run_name": "Agent"})
+    model_name="gpt-3.5-turbo", openai_api_key=OPENAI_API_KEY, temperature=0.7
+).with_config({"run_name": "RecluseAI"})
 
-# configure memory
 memory = MemorySaver()
 
-# default memory
-config = {"configurable": {"thread_id": "default"}}
-
-
-# define model
-model_with_tools = model.bind_tools(tools)
-
-
-context_matches = [
-    'humor', 'task', 'query', 'conversation', 'appreciation', 'engagement', 'confused',
-]
-
-# test
-# response = model_with_tools.invoke([HumanMessage(content="Hi there, What is the weather in Lagos?")])
-response = model.invoke(
-    [HumanMessage(content="Hi there, What is the weather in Lagos?")], config=tools
+# Agent setup
+agent_executor = create_react_agent(
+    tools=[search_for_info, search_by_user_context],
+    model=model,
+    checkpointer=memory,
+    state_modifier=get_system_message("conversation"),
 )
-# print(f"ContentString: {response.content}")
-# print(f"ToolCalls: {response.tool_calls}")
 
+
+async def process_single_tweet(tweet):
+    """
+    Process a single tweet by invoking the agent and deciding whether to reply or retweet.
+    """
+    try:
+        # Pass the tweet to the agent for analysis and decision-making
+        decision = await agent_executor.invoke(
+            [HumanMessage(content=tweet["content"])]
+        )
+
+        if "reply" in decision.lower():
+            print(f"Replying to tweet: {tweet['content']}")
+            await reply_to_tweet(tweet_id=tweet["id"], content="Your reply here")
+        elif "retweet" in decision.lower():
+            print(f"Retweeting: {tweet['content']}")
+            await retweet_tweet(tweet_id=tweet["id"])
+        else:
+            print(f"No action taken for: {tweet['content']}")
+
+    except Exception as e:
+        print(f"Error processing tweet: {e}")
+        traceback.print_exc()
+
+
+async def process_tweets():
+    """
+    Fetch and process tweets in an infinite loop, with rate limiting and error handling.
+    """
+    retry_delay = 60  # Initial delay betweena retries
+
+    while True:
+        try:
+            print("Fetching recent tweets...")
+            tweets = await fetch_10_recent_tweets()
+
+            for tweet in tweets:
+                await process_single_tweet(tweet)
+
+            # Reset delay after successful processing
+            retry_delay = 60
+            await asyncio.sleep(retry_delay)
+
+        except Exception as e:
+            print(f"Error fetching tweets: {e}")
+            traceback.print_exc()
+
+            # Exponential backoff to handle repeated errors
+            retry_delay = min(retry_delay * 2, 3600)  # Cap at 1 hour
+            print(f"Retrying in {retry_delay} seconds...")
+            await asyncio.sleep(retry_delay)
+
+
+# Main function to run the agent
+def main():
+    """
+    Main entry point to start the Twitter agent.
+    """
+    print("Starting Twitter agent...")
+    # Create a new event loop and run the async function
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        loop.run_until_complete(process_tweets())
+    finally:
+        loop.close()
 
 async def main():
-    agent = create_react_agent(
-        tools=[search_for_info, search_by_user_context],
-        model=model,
-        checkpointer=memory,
-        state_modifier=personality_message,
-    )
-
-
-agent_executor = create_react_agent(model, tools, checkpointer=memory)
+    """
+    This is the main entry point of the recluse ai agent.
+    Check for mentions every 5 minutes.
+    Read Trending topics every 5 minutes.
+    """
 
 if __name__ == "__main__":
     asyncio.run(main())

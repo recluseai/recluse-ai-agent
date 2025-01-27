@@ -1,21 +1,22 @@
 from langchain_core.tools import tool
 from langchain_community.tools.tavily_search import TavilySearchResults
-from config import (
+from .config import (
     OPENAI_API_KEY,
     TAVILY_API_KEY,
-    TWITTER_API_KEY,
-    TWITTER_API_SECRET,
-    TWITTER_ACCESS_TOKEN,
-    TWITTER_ACCESS_SECRET,
+    TWITTER_AUTH_CONSUMER_KEY,
+    TWITTER_AUTH_CONSUMER_SECRET,
+    TWITTER_AUTH_ACCESS_TOKEN,
+    TWITTER_AUTH_ACCESS_TOKEN_SECRET,
+    TWITTER_AUTH_BEARER_TOKEN,
 )
 import tweepy
 
 # Configure Twitter API
 auth = tweepy.OAuth1UserHandler(
-    consumer_key=TWITTER_API_KEY,
-    consumer_secret=TWITTER_API_SECRET,
-    access_token=TWITTER_ACCESS_TOKEN,
-    access_token_secret=TWITTER_ACCESS_SECRET,
+    consumer_key=TWITTER_AUTH_CONSUMER_KEY,
+    consumer_secret=TWITTER_AUTH_CONSUMER_SECRET,
+    access_token=TWITTER_AUTH_ACCESS_TOKEN,
+    access_token_secret=TWITTER_AUTH_ACCESS_TOKEN_SECRET,
 )
 
 # initialize twitter api
@@ -103,6 +104,7 @@ def search_for_info(query: str):
 
 @tool
 def provide_snarky_reply(query: str):
+    """You're a snarky bot"""
     return "You're a snarky bot"
 
 tools = [search_for_info, search_by_user_context, provide_snarky_reply]
