@@ -1,8 +1,11 @@
+import time
+import openai
 import asyncio
 import traceback
 from redis.asyncio import Redis
+from tenacity import retry, stop_after_attempt, wait_exponential
 
-# langchain imports
+# LangChain imports
 from langchain_core.messages import HumanMessage, SystemMessage
 
 # Relative imports
@@ -16,20 +19,14 @@ from src.twitter_functions import (
 )
 from src.utils.agent_helpers import provide_conversation_context
 
-# from src.agent_tools import search_by_user_context, search_for_info
-# from src.config import OPENAI_API_KEY
-
-
-# global declaration of redis
+# Global Redis declaration
 redis = None
-
 
 async def init_redis():
     """Initialize Redis connection."""
     global redis
     redis = await Redis.from_url("redis://localhost", decode_responses=True)
     print("Redis connected!")
-
 
 async def close_redis():
     """Close Redis connection properly."""
@@ -38,97 +35,91 @@ async def close_redis():
         await redis.close()
         print("Redis connection closed!")
 
+# Initialize rate limiting variables
+REQUEST_INTERVAL = 5  # 5 seconds between requests
+last_request_time = time.time()
+
+# Exponential backoff for OpenAI API calls
+@retry(wait=wait_exponential(multiplier=1, min=1, max=10), stop=stop_after_attempt(5))
+def call_openai(prompt):
+    response = agent_executor.invoke(
+        {"messages": [HumanMessage(content=prompt)]},
+        config={**config, "stream": True}  # Enable streaming for efficiency
+    )
+    return response
+
+def call_openai_with_throttling(prompt):
+    global last_request_time, REQUEST_INTERVAL
+
+    # Ensure a gap between API calls
+    time_since_last_request = time.time() - last_request_time
+    if time_since_last_request < REQUEST_INTERVAL:
+        time.sleep(REQUEST_INTERVAL - time_since_last_request)
+
+    last_request_time = time.time()
+
+    try:
+        return call_openai(prompt)  # Call OpenAI with retry logic
+    except openai.error.RateLimitError:
+        print("⚠️ Rate limit hit! Increasing interval to prevent further 429 errors.")
+        REQUEST_INTERVAL += 2  # Increase delay dynamically
+        return None
 
 async def identify_bot(tweet):
-    """
-    Identify if a tweet is from a bot."""
+    """Identify if a tweet is from a bot."""
     try:
         prompt = """
-        identify if account is suspicious of being a bot.
-        if account is a bot, output 'suspicious' without the quotations.
-        if account is not a bot, output 'proceed' without the quotations.
+        Identify if the account is suspicious of being a bot.
+        If the account is a bot, output 'suspicious' without the quotations.
+        If the account is not a bot, output 'proceed' without the quotations.
         """
+        
+        print("Processing tweet for bot detection:", tweet)
+        decision = call_openai_with_throttling(f"{prompt}\n\n{tweet}")
+        decision_return_value = decision["messages"][-1].content
 
-        print("tweet to be processed: ", tweet)
-        decision = agent_executor.invoke(
-            {"messages": [HumanMessage(content=f"{prompt}\n\n{tweet}")]}, config=config
-        )
-        decision_return_value = decision["messages"][1].content
-
-        # print("decision return value: ", decision_return_value)
-
-        if decision_return_value.lower() == "suspicous":
+        if decision_return_value and decision_return_value.strip().lower() == "suspicious":
             return True
-        else:
-            return False
+        return False
 
     except Exception as e:
         print(f"Error processing tweet: {e}")
         traceback.print_exc()
-
+        return False
 
 async def process_single_mention(tweet, tweet_id):
-    """
-    Process a single tweet by invoking the agent and deciding whether to reply or retweet.
-    """
-
+    """Process a single tweet by invoking the agent and deciding whether to reply or retweet."""
     try:
         is_bot = await identify_bot(tweet)
-        print("is bot: ", is_bot)
-        is_bot = False
-
-        prompt = """
-        reply to this tweet
-        """
-
-        print(f"{prompt}\n\n{tweet}")
-
+        print("Bot detection result:", is_bot)
+        
         if not is_bot:
             conversation_context = await provide_conversation_context(tweet)
-            print("this is what conversation context decided: ", conversation_context)
-
+            print("Conversation context result:", conversation_context)
+            
             if conversation_context.lower().strip() == "conversation":
-                response = agent_executor.invoke(
-                    {
-                        "messages": [
-                            SystemMessage(content="Respond only to the given input."),
-                            HumanMessage(content=f"{prompt}\n\n{tweet}"),
-                        ]
-                    },
-                    config={**config, "memory": None},
-                )
-                decision_return_value = response["messages"][-1].content
-                print("Query reply from return value: ", decision_return_value)
+                response = call_openai_with_throttling(tweet)
+                print("AI response:", response)
 
-                # reply to tweet
-                await reply_to_tweet(
-                    tweet_id=tweet_id, message=decision_return_value, redis=redis
-                )
-                insert_tweet = supabase.table("recluse_mentions").update({"replied_status": True}).eq("id", tweet_id).execute()
-                print("tweet replied to: ", insert_tweet)
+                if response:
+                    await reply_to_tweet(tweet_id=tweet_id, message=response, redis=redis)
+                    supabase.table("recluse_mentions").update({"replied_status": True}).eq("id", tweet_id).execute()
+                    print("Tweet replied to and database updated.")
                 
             elif conversation_context.lower().strip() == "query":
                 response = await search_for_tweets(redis, keyword=tweet, count=50)
-                print("conversation reply from single tweet: ", response["response"])
-                print("tweet id: ", tweet_id)
-                tweet_reply = response["response"]
-
-                # reply to tweet
-                await reply_to_tweet(
-                    tweet_id=tweet_id, message=tweet_reply, redis=redis
-                )
-                insert_tweet = supabase.table("recluse_mentions").update({"replied_status": True}).eq("id", tweet_id).execute()
-                print("tweet replied to: ", insert_tweet)
-
+                tweet_reply = response.get("response", "No relevant results found.")
+                
+                await reply_to_tweet(tweet_id=tweet_id, message=tweet_reply, redis=redis)
+                supabase.table("recluse_mentions").update({"replied_status": True}).eq("id", tweet_id).execute()
+                print("Query-based tweet reply sent.")
+    
     except Exception as e:
         print(f"Error processing tweet: {e}")
         traceback.print_exc()
 
-
 async def process_mentions():
-    """
-    Fetch and respond to Twitter mentions.
-    """
+    """Fetch and respond to Twitter mentions."""
     try:
         print("Checking mentions...")
         mentions = await read_mentions("recluseai_", redis)
@@ -136,30 +127,24 @@ async def process_mentions():
         for tweet in mentions["mentions_tweet"]:
             tweet_id = tweet["id"]
 
-            # Check if the tweet exists and has been replied to
-            response = (
-                supabase.table("recluse_mentions")
-                .select("replied_status")
-                .eq("id", tweet_id)
-                .execute()
-            )
-
-            # If the tweet exists and has been replied to, skip it
-            if response.data and response.data[0]["replied_status"]:
-                print(f"Tweet {tweet_id} has already been replied to. Skipping...")
-                continue  # Skip processing
-
-            # Process the tweet if it's new or not yet replied to
+            # Check if the tweet has been replied to
+            response = supabase.table("recluse_mentions").select("replied_status").eq("id", tweet_id).execute()
+            
+            if response.data: 
+                if response.data[0].get("replied_status"):
+                    print(f"Tweet {tweet_id} has already been replied to. Skipping...")
+                    continue
+            
+            else: 
+                supabase.table("recluse_mentions").insert({"id": tweet_id, "replied_status": False}).execute()
             await process_single_mention(tweet["original_tweet"], tweet_id=tweet_id)
+    
     except Exception as e:
         print(f"Error processing mentions: {e}")
         traceback.print_exc()
 
-
 async def main():
-    """
-    Main loop: Start ai agent by deciding which task to execute and run accordingly.
-    """
+    """Main loop: Start AI agent and process mentions in a loop."""
     print("Starting RecluseAI Twitter agent...")
 
     await init_redis()
@@ -167,14 +152,12 @@ async def main():
     try:
         while True:
             await process_mentions()
-
             await asyncio.sleep(90)  # Wait for 1.5 minutes before checking again
     except Exception as e:
         print(f"Unexpected error: {e}")
         traceback.print_exc()
     finally:
         await close_redis()
-
 
 if __name__ == "__main__":
     asyncio.run(main())
@@ -185,12 +168,12 @@ if __name__ == "__main__":
 # ai agent decides what to do --- [skip for now]
 ## if decision is 'check mentions'
 # read recent mentions --- [done]
-# ai agent decides whether mention is bot or real.
-# for bots, ignore.
-# for real users, ai agent interprets the type of request.
-# if request is for information, ai agent searches for information.
-# if request is for a reply, ai agent comes up with a reply.
-# if request is for retweet, ai agent retweets the tweet.
+# ai agent decides whether mention is bot or real. [done]
+# for bots, ignore. [done]
+# for real users, ai agent interprets the type of request. [done]
+# if request is for information, ai agent searches for information. [done]
+# if request is for a reply, ai agent comes up with a reply. [done]
+# if request is for retweet, ai agent retweets the tweet. [pending]
 
 
 # types of request

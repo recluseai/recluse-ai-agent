@@ -199,7 +199,7 @@ async def reply_to_tweet(redis, message, tweet_id):
         
         return {
             "status": "success",
-            "reply_id": response["id"],
+            # "reply_id": response["id"],
             "message": "Reply sent successfully!"
         }
 

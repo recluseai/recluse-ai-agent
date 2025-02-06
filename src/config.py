@@ -6,6 +6,9 @@ from src.agent_personality import get_system_message
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, SystemMessage
 from supabase import create_client, Client
+from tenacity import retry, stop_after_attempt, wait_exponential
+import time
+
 
 load_dotenv()
 
@@ -48,3 +51,26 @@ agent_executor = create_react_agent(
     state_modifier=get_system_message("humour"),
 )
 
+
+last_request_time = time.time()
+REQUEST_INTERVAL = 5  # 5 seconds between requests
+
+# Exponential backoff: Retries up to 5 times with increasing delays (1s, 2s, 4s, 8s...)
+@retry(wait=wait_exponential(multiplier=1, min=1, max=10), stop=stop_after_attempt(5))
+def call_openai(prompt):
+    response = agent_executor.invoke(
+        {"messages": [HumanMessage(content=prompt)]},
+        config=config
+    )
+    return response
+
+def call_openai_with_throttling(prompt):
+    global last_request_time
+
+    # Ensure a gap between API calls
+    time_since_last_request = time.time() - last_request_time
+    if time_since_last_request < REQUEST_INTERVAL:
+        time.sleep(REQUEST_INTERVAL - time_since_last_request)
+
+    last_request_time = time.time()
+    return call_openai(prompt)  # Call OpenAI with retry logic
