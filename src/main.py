@@ -9,7 +9,7 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 from langchain_core.messages import HumanMessage, SystemMessage
 
 # Relative imports
-from src.config import agent_executor, config, supabase
+from src.config import agent_executor, config, supabase, redis_url
 from src.twitter_functions import (
     search_for_tweets,
     fetch_10_recent_tweets,
@@ -25,7 +25,7 @@ redis = None
 async def init_redis():
     """Initialize Redis connection."""
     global redis
-    redis = await Redis.from_url("redis://localhost", decode_responses=True)
+    redis = await Redis.from_url(redis_url, decode_responses=True)
     print("Redis connected!")
 
 async def close_redis():

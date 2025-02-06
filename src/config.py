@@ -7,6 +7,7 @@ from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, SystemMessage
 from supabase import create_client, Client
 from tenacity import retry, stop_after_attempt, wait_exponential
+
 import time
 
 
@@ -16,6 +17,9 @@ load_dotenv()
 url: str = os.getenv("SUPABASE_URL")
 key: str = os.getenv("SUPABASE_KEY")
 supabase: Client = create_client(url, key)
+
+# redis url
+redis_url = os.getenv("REDIS_URL", "redis://localhost")
 
 #twitter api
 TWITTER_AUTH_CONSUMER_KEY = os.getenv("TWITTER_AUTH_CONSUMER_KEY")
