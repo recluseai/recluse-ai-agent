@@ -5,8 +5,14 @@ from langgraph.checkpoint.memory import MemorySaver
 from src.agent_personality import get_system_message
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, SystemMessage
+from supabase import create_client, Client
 
 load_dotenv()
+
+
+url: str = os.getenv("SUPABASE_URL")
+key: str = os.getenv("SUPABASE_KEY")
+supabase: Client = create_client(url, key)
 
 #twitter api
 TWITTER_AUTH_CONSUMER_KEY = os.getenv("TWITTER_AUTH_CONSUMER_KEY")
@@ -17,8 +23,8 @@ TWITTER_AUTH_ACCESS_TOKEN_SECRET = os.getenv("TWITTER_AUTH_ACCESS_TOKEN_SECRET")
 
 # openai api
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-OPENAI_CLIENT_ID = os.getenv("CLIENT_ID")
-OPENAI_CLIENT_SECRET = os.getenv("CLIENT_SECRET")
+# OPENAI_CLIENT_ID = os.getenv("CLIENT_ID")
+# OPENAI_CLIENT_SECRET = os.getenv("CLIENT_SECRET")
 
 # tavily api key
 TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
@@ -41,3 +47,4 @@ agent_executor = create_react_agent(
     checkpointer=memory,
     state_modifier=get_system_message("humour"),
 )
+
