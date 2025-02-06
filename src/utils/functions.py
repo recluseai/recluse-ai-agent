@@ -87,57 +87,57 @@ def parse_tweet(tweet_text: str) -> Dict[str, List[str]]:
     }
   
     
-def is_obvious_bot(user):
-    """Quickly check for obvious bot-like behavior using basic rules."""
-    try:
-        # user = api.get_user(screen_name=username)
-        bot_score = 0
+# def is_obvious_bot(user):
+#     """Quickly check for obvious bot-like behavior using basic rules."""
+#     try:
+#         # user = api.get_user(screen_name=username)
+#         bot_score = 0
 
-        # Rule 1: Low followers, high following
-        if user.followers_count < 10 and user.friends_count > 100:
-            bot_score += 2
+#         # Rule 1: Low followers, high following
+#         if user.followers_count < 10 and user.friends_count > 100:
+#             bot_score += 2
         
-        # Rule 2: No profile picture
-        if not user.profile_image_url or "default" in user.profile_image_url:
-            bot_score += 2
+#         # Rule 2: No profile picture
+#         if not user.profile_image_url or "default" in user.profile_image_url:
+#             bot_score += 2
         
-        # Rule 3: Suspicious username (contains numbers)
-        if any(char.isdigit() for char in user.screen_name): 
-            bot_score += 1
+#         # Rule 3: Suspicious username (contains numbers)
+#         if any(char.isdigit() for char in user.screen_name): 
+#             bot_score += 1
         
-        # Rule 4: No bio or very short bio
-        if len(user.description) < 10:
-            bot_score += 1
+#         # Rule 4: No bio or very short bio
+#         if len(user.description) < 10:
+#             bot_score += 1
         
-        # Rule 5: High activity in a short period (new account but lots of tweets)
-        if user.statuses_count > 5000 and user.created_at.year > 2023:
-            bot_score += 3
+#         # Rule 5: High activity in a short period (new account but lots of tweets)
+#         if user.statuses_count > 5000 and user.created_at.year > 2023:
+#             bot_score += 3
         
-        # Rule 6: Default profile settings
-        if user.default_profile:
-            bot_score += 1
+#         # Rule 6: Default profile settings
+#         if user.default_profile:
+#             bot_score += 1
 
-        return bot_score > 4  # Returns True if the bot score is high
-    except tweepy.TweepError:
-        return False  
+#         return bot_score > 4  # Returns True if the bot score is high
+#     except tweepy.TweepError:
+#         return False  
 
-def check_bot(user, username):
-    """First run rule-based detection, then check Botometer if needed."""
-    if is_obvious_bot(user=user):
-        print(f"⚠️ {username} looks like a bot based on rules! No need for Botometer.")
-        return True  # Confirmed bot
+# def check_bot(user, username):
+#     """First run rule-based detection, then check Botometer if needed."""
+#     if is_obvious_bot(user=user):
+#         print(f"⚠️ {username} looks like a bot based on rules! No need for Botometer.")
+#         return True  # Confirmed bot
 
-    try:
-        # Step 2: Run Botometer if the account is suspicious based on rules
-        result = botometer_api.check_account(username)
-        bot_score = result['display_scores']['universal']
+#     try:
+#         # Step 2: Run Botometer if the account is suspicious based on rules
+#         result = botometer_api.check_account(username)
+#         bot_score = result['display_scores']['universal']
         
-        if bot_score > 3:  # Botometer score > 3 means high bot likelihood
-            print(f"🤖 {username} is likely a bot! (Botometer Score: {bot_score}/5)")
-            return True
-        else:
-            print(f"✅ {username} looks like a human! (Botometer Score: {bot_score}/5)")
-            return False
-    except Exception as e:
-        print(f"⚠️ Error checking {username} on Botometer: {e}")
-        return False  # Assume not a bot if API fails
+#         if bot_score > 3:  # Botometer score > 3 means high bot likelihood
+#             print(f"🤖 {username} is likely a bot! (Botometer Score: {bot_score}/5)")
+#             return True
+#         else:
+#             print(f"✅ {username} looks like a human! (Botometer Score: {bot_score}/5)")
+#             return False
+#     except Exception as e:
+#         print(f"⚠️ Error checking {username} on Botometer: {e}")
+#         return False  # Assume not a bot if API fails

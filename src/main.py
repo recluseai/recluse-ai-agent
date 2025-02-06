@@ -6,7 +6,7 @@ from redis.asyncio import Redis
 from langchain_core.messages import HumanMessage, SystemMessage
 
 # Relative imports
-from src.config import agent_executor, config
+from src.config import agent_executor, config, supabase
 from src.twitter_functions import (
     search_for_tweets,
     fetch_10_recent_tweets,
@@ -104,16 +104,21 @@ async def process_single_mention(tweet, tweet_id):
                 await reply_to_tweet(
                     tweet_id=tweet_id, message=decision_return_value, redis=redis
                 )
+                insert_tweet = supabase.table("recluse_mentions").update({"replied_status": True}).eq("id", tweet_id).execute()
+                print("tweet replied to: ", insert_tweet)
+                
             elif conversation_context.lower().strip() == "query":
-                response = await search_for_tweets(redis, keyword=tweet, count=70)
-                print("conversation reply from single tweet: ", response['response'])
-                print('tweet id: ', tweet_id)
+                response = await search_for_tweets(redis, keyword=tweet, count=50)
+                print("conversation reply from single tweet: ", response["response"])
+                print("tweet id: ", tweet_id)
                 tweet_reply = response["response"]
 
                 # reply to tweet
                 await reply_to_tweet(
                     tweet_id=tweet_id, message=tweet_reply, redis=redis
                 )
+                insert_tweet = supabase.table("recluse_mentions").update({"replied_status": True}).eq("id", tweet_id).execute()
+                print("tweet replied to: ", insert_tweet)
 
     except Exception as e:
         print(f"Error processing tweet: {e}")
@@ -129,9 +134,23 @@ async def process_mentions():
         mentions = await read_mentions("recluseai_", redis)
 
         for tweet in mentions["mentions_tweet"]:
-            # print('this is the original tweet to be processed: ', tweet["original_tweet"])
-            await process_single_mention(tweet["original_tweet"], tweet_id=tweet["id"])
+            tweet_id = tweet["id"]
 
+            # Check if the tweet exists and has been replied to
+            response = (
+                supabase.table("recluse_mentions")
+                .select("replied_status")
+                .eq("id", tweet_id)
+                .execute()
+            )
+
+            # If the tweet exists and has been replied to, skip it
+            if response.data and response.data[0]["replied_status"]:
+                print(f"Tweet {tweet_id} has already been replied to. Skipping...")
+                continue  # Skip processing
+
+            # Process the tweet if it's new or not yet replied to
+            await process_single_mention(tweet["original_tweet"], tweet_id=tweet_id)
     except Exception as e:
         print(f"Error processing mentions: {e}")
         traceback.print_exc()

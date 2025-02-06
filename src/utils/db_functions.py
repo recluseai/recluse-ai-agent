@@ -1,35 +1,10 @@
-from sqlalchemy.orm import Session
-from models import Mention  # Assuming there is a Mention model defined
+from src.config import supabase
 
-def check_mentions_replied(db: Session, mentions: list) -> list:
-    """
-    Checks if each mention in the provided list has been replied to by querying the database.
+# Insert a Tweet mention
+def insert_mention(tweet_id: int, replied_status: bool = False):
+    data = {"id": tweet_id, "replied_status": replied_status}
+    response = supabase.table("recluse_mentions").insert(data).execute()
+    print(response)
 
-    Args:
-        db (Session): The database session.
-        mentions (list): A list of mention IDs to check.
-
-    Returns:
-        list: A list of booleans indicating whether each mention has been replied to.
-    """
-    replied_status = []
-    for mention_id in mentions:
-        mention = db.query(Mention).filter(Mention.id == mention_id).first()
-        replied_status.append(mention.replied if mention else False)
-    return replied_status
-
-def mark_mention_as_replied(db: Session, mention_id: int) -> None:
-    """
-    Mark a mention as replied to in the database.
-
-    Args:
-        db (Session): The database session.
-        mention_id (int): The ID of the mention to mark.
-
-    Returns:
-        None
-    """
-    mention = db.query(Mention).filter(Mention.id == mention_id).first()
-    if mention:
-        mention.replied = True
-        db.commit()
+# Example Usage
+insert_mention(1623456789012345678)  # Replace with an actual tweet ID
