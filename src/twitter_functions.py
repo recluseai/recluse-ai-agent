@@ -1,5 +1,8 @@
 from fastapi import FastAPI, HTTPException, Query
 from tweepy import Client
+from pydantic import BaseModel
+from langchain_core.tools import Tool
+from src.utils.agent_helpers import provide_summary, provide_search_context
 
 from .config import (
     TWITTER_AUTH_CONSUMER_KEY,
@@ -37,6 +40,46 @@ class ReplyRequest(BaseModel):
 class TweetContent(BaseModel):
     content: str
 
+class FetchTweetsInput(BaseModel):
+    count: int = 100
+    search: str | None = None
+
+# Convert fetch_tweets into a LangChain-compatible tool
+async def fetch_tweets_tool(count: int = 100, search: str | None = None):
+    """
+    Fetches the latest tweets from the authenticated user's timeline.
+    Optionally filters tweets by a search query.
+    """
+    try:
+        async with limiter_fetch_tweets:
+            # Fetch tweets from the timeline
+            response = client.get_home_timeline(max_results=count)
+
+            if not response.data:
+                return {"data": [], "count": 0}
+
+            # Extract tweets
+            tweets = [{"id": tweet.id, "text": tweet.text} for tweet in response.data]
+
+            # Apply search filter if a query is provided
+            if search:
+                search = search.lower()
+                tweets = [tweet for tweet in tweets if search in tweet["text"].lower()]
+
+        return {"data": tweets, "count": len(tweets)}
+
+    except Exception as e:
+        logger.error(f"Error fetching tweets: {e}")
+        raise HTTPException(status_code=500, detail="Error fetching tweets")
+
+
+# Wrap the function as a LangChain tool
+fetch_tweets_tool_wrapper = Tool(
+    name="fetch_tweets",
+    func=fetch_tweets_tool,
+    args_schema=FetchTweetsInput,  # This tells LangChain what parameters to expect
+    description="Fetches the latest tweets from the authenticated user's timeline. Optionally filters by a search query. Takes 'count' (int) and 'search' (str) as input."
+)
 
 # Instantiate FastAPI app
 app = FastAPI()
@@ -95,9 +138,7 @@ async def is_rate_limited(redis) -> bool:
 
     return False
 
-# twitter mentions function
-
-@app.post("/mentions/{username}")
+# working tools
 async def read_mentions(username: str, redis):
     """
     Fetches the latest mentions for RecluseAI.
@@ -139,26 +180,78 @@ async def read_mentions(username: str, redis):
         logger.error(f"Error fetching mentions: {e}")
         raise HTTPException(status_code=500, detail="Error fetching mentions")
 
-# twitter tweet functions
-
-
-@app.post("/tweet")
-def post_tweet(content: str):
+async def reply_to_tweet(redis, message, tweet_id):
     """
-    Posts a new tweet.
+    Replies to a tweet with the given message while enforcing rate limits.
     """
     try:
-        with rate_limiter:
-            tweet = client.create_tweet(text=content)
+        if len(message) > 280:
+            raise ValueError("Message exceeds Twitter's character limit (280 characters).")
+        
+        # Check rate limits
+        if await is_rate_limited(redis):
+            raise HTTPException(status_code=429, detail="Rate limit exceeded. Please try again later.")
+
+        # Simulated API call for reply
+        response = client.create_tweet(text=message, in_reply_to_tweet_id=tweet_id)
+
+        logger.info(f"Reply sent successfully to tweet ID {tweet_id}: {message}")
+        
         return {
             "status": "success",
-            "tweet_id": tweet.data["id"],
-            "content": tweet.data["text"],
+            "reply_id": response["id"],
+            "message": "Reply sent successfully!"
         }
-    except Exception as e:
-        logger.error(f"Error posting tweet: {e}")
-        raise HTTPException(status_code=500, detail="Error posting tweet")
 
+    except ValueError as ve:
+        logger.warning(f"Validation error: {ve}")
+        raise HTTPException(status_code=400, detail=str(ve))
+
+    except Exception as e:
+        logger.error(f"Error replying to tweet: {e}")
+        raise HTTPException(status_code=500, detail="Error replying to tweet")
+
+async def search_for_tweets(redis, keyword: str, count: int = 5):
+    """
+    Scans a user's tweets for relevance based on a keyword.
+    """
+    try:
+          # Check rate limits
+        if await is_rate_limited(redis):
+            raise HTTPException(status_code=429, detail="Rate limit exceeded. Please try again later.")
+        
+        search_context = await provide_search_context(search_query=keyword)
+        
+        print(f"search context: {search_context}")
+
+        response = client.search_recent_tweets(query=search_context, max_results=100)
+        logger.info(f"Searching for tweets containing '{keyword}'")
+
+        print('current response from search: ', response)
+        
+        # if(response.data == None) or (len(response.data) == 0):
+        #     await return 
+        
+        concat_tweet = ''
+        for tweet in response.data:
+            concat_tweet = concat_tweet + tweet.text
+        
+        response = await provide_summary(concat_tweet)
+        
+        print(f"response within search for tweets context:", response)
+        return {"status": "success", "response": response}
+    
+    except ValueError as ve:
+        logger.warning(f"Validation error: {ve}")
+        raise HTTPException(status_code=400, detail=str(ve))
+    
+    except Exception as e:
+        logger.error(f"Error fetching relevant tweets: {e}")
+        raise HTTPException(status_code=500, detail="Error fetching relevant tweets")
+
+
+
+#   WIP twitter tweet functions
 
 @app.post("/retweet")
 async def retweet_tweet(tweet_id: int):
@@ -177,41 +270,6 @@ async def retweet_tweet(tweet_id: int):
     except Exception as e:
         logger.error(f"Error retweeting tweet: {e}")
         raise HTTPException(status_code=500, detail="Error retweeting tweet")
-
-
-@app.post("/reply_to_tweet")
-def reply_to_tweet(request: ReplyRequest):
-    """
-    Replies to a tweet with the given message.
-    """
-    try:
-        tweet_id = request.tweet_id
-        message = request.message
-
-        if len(message) > 280:
-            raise ValueError(
-                "Message exceeds Twitter's character limit (280 characters)."
-            )
-        # call openai function to regenerate tweet if context window exceeds 280 characters
-        with rate_limiter:
-            # Simulated API call for reply
-            response = client.create_tweet(text=message, in_reply_to_tweet_id=tweet_id)
-
-        logger.info(f"Reply sent successfully to tweet ID {tweet_id}: {message}")
-        return {
-            "status": "success",
-            "reply_id": response["id"],
-            "message": "Reply sent successfully!",
-        }
-
-    except ValueError as ve:
-        logger.warning(f"Validation error: {ve}")
-        raise HTTPException(status_code=400, detail=str(ve))
-
-    except Exception as e:
-        logger.error(f"Error replying to tweet: {e}")
-        raise HTTPException(status_code=500, detail="Error replying to tweet")
-
 
 @app.get("/fetch_10_recent_tweets")
 async def fetch_10_recent_tweets(count: int = 10):
@@ -232,9 +290,8 @@ async def fetch_10_recent_tweets(count: int = 10):
         logger.error(f"Error fetching tweets: {e}")
         raise HTTPException(status_code=500, detail="Error fetching tweets")
 
-
 @app.get("/fetch_tweets")
-async def fetch_tweets(count: int = 10, search: str = Query(default=None)):
+async def fetch_tweets(count: int = 100, search: str = Query(default=None)):
     """
     Fetches the latest tweets from the authenticated user's timeline.
     Optionally filters tweets by a search query.
@@ -368,10 +425,6 @@ async def scan_relevant_tweets(username: str, keyword: str, count: int = 5):
         logger.error(f"Error fetching relevant tweets: {e}")
         raise HTTPException(status_code=500, detail="Error fetching relevant tweets")
 
-
-@app.get("/items/{item_id}")
-def read_item(item_id: int, q: Union[str, None] = None):
-    return {"item_id": item_id, "q": q}
 
 
 @app.post("/analyze")
