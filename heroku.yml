@@ -1,0 +1,5 @@
+build:
+  docker:
+    web: Dockerfile  # This tells Heroku to build your app using the Dockerfile
+run:
+  web: python src/main.py  # Command to start your app
