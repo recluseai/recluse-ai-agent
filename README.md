@@ -16,7 +16,7 @@ RecluseAI is an intelligent, autonomous Twitter agent that engages with mentions
 
 ## 🛠 Tech Stack
 
-- **Python 3.9+**
+- **Python 3.11**
 - **Redis (asyncio)**
 - **OpenAI API**
 - **LangChain**
