@@ -2,7 +2,8 @@ from fastapi import FastAPI, HTTPException, Query
 from tweepy import Client
 from pydantic import BaseModel
 from langchain_core.tools import Tool
-from src.utils.agent_helpers import provide_summary, provide_search_context
+from src.utils.agent_helpers import provide_summary, provide_search_context, respond_to_conversation
+from src.config import call_openai_with_throttling
 
 from .config import (
     TWITTER_AUTH_CONSUMER_KEY,
@@ -227,18 +228,23 @@ async def search_for_tweets(redis, keyword: str, count: int = 5):
         response = client.search_recent_tweets(query=search_context, max_results=100)
         logger.info(f"Searching for tweets containing '{keyword}'")
 
-        print('current response from search: ', response)
+        # print('current response from search: ', response)
         
-        # if(response.data == None) or (len(response.data) == 0):
-        #     await return 
         
+        if(response.data == None) or (len(response.data) == 0):
+            response = respond_to_conversation(tweet)
+            print("actual tweet:", tweet)
+            print("AI response call:", response)
+             
         concat_tweet = ''
-        for tweet in response.data:
-            concat_tweet = concat_tweet + tweet.text
-        
-        response = await provide_summary(concat_tweet)
-        
-        print(f"response within search for tweets context:", response)
+        if len(response.data) > 0:
+            for tweet in response.data:
+                concat_tweet = concat_tweet + tweet.text
+                response = await provide_summary(concat_tweet)
+                print("AI response summary:", response)
+            
+                    
+        # print(f"response within search for tweets context:", response)
         return {"status": "success", "response": response}
     
     except ValueError as ve:

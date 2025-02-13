@@ -16,7 +16,7 @@ async def provide_summary(concat: str):
     response = agent_executor.invoke(
         {"messages": [HumanMessage(content=prompt)]}, config=config
     )
-    print("response from provide summary: ", response)
+    print("response from provide summary: ", response["messages"][-1].content)
     return response["messages"][-1].content
 
 
@@ -28,36 +28,60 @@ async def provide_search_context(search_query: str):
 
     # Clone config and override state_modifier
     custom_config = {
-          **config,
+        **config,
         "system_message": "You are a neutral search assistant. Ignore all previous context.",
         "state_modifier": get_system_message("urgent"),
-        }
+    }
 
     response = agent_executor.invoke(
         {"messages": [HumanMessage(content=prompt)]},
         config=custom_config,
     )
-    
+
     # print("response from provide search context: ", response)
     return response["messages"][-1].content
 
-async def provide_conversation_context(tweet: str, state='default'):
+
+async def provide_conversation_context(tweet: str, state="default"):
     prompt = f"""
-    identify if the user is being conversational in this tweet: {tweet}, or they are aking a question. Return keyword 'query' only without the quotations if a question is being asked, else return 'conversational' keyword without the quotations.
+    identify if the user is being conversational in this tweet: {tweet}, or they are asking you to search for something on twitter. Return keyword 'twitter' only without the quotations if a you are asked a question you can find on twitter with a one word keyword, else return 'conversational' keyword without the quotations.
     """
 
-    
     # Clone config and override state_modifier
     custom_config = {
-          **config,
+        **config,
         "system_message": "Ignore all previous context. You are to understand the tone of a conversation and return the appropriate keyword.",
         "state_modifier": get_system_message(state),
-        }
+    }
 
     response = agent_executor.invoke(
         {"messages": [HumanMessage(content=prompt)]},
         config=custom_config,
     )
-    
+
     # print("response from provide search context: ", response)
+    return response["messages"][-1].content
+
+
+async def respond_to_conversation(
+    tweet: str,
+):
+    prompt = f"""
+    You have a conversational, witty personality, you can roast and be sarcastic with people as you like, but most of the time one line respones are enough.
+    If they ask you about yourself and what you can do, you can reply honestly.
+    {tweet}
+    """
+
+    # Clone config and override state_modifier
+    custom_config = {
+        **config,
+        "system_message": "Ignore all previous context. You are to understand the tone of a conversation",
+        "state_modifier": get_system_message("conversation"),
+    }
+    response = agent_executor.invoke(
+        {"messages": [HumanMessage(content=prompt)]},
+        config=custom_config,
+        checkpointer=None,
+    )
+    print("response from provide summary: ", response["messages"][-1].content)
     return response["messages"][-1].content

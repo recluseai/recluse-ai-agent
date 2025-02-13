@@ -59,7 +59,6 @@ def develop_user_context(user_account: str):
     except tweepy.TweepError as e:
         return f"Error fetching user data: {str(e)}"
 
-
 # define tools
 @tool(response_format="content_and_artifact")
 def search_by_user_context(user_account: str):

@@ -9,7 +9,7 @@ from supabase import create_client, Client
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 import time
-
+import openai
 
 load_dotenv()
 
@@ -69,7 +69,7 @@ def call_openai(prompt):
     return response
 
 def call_openai_with_throttling(prompt):
-    global last_request_time
+    global last_request_time, REQUEST_INTERVAL
 
     # Ensure a gap between API calls
     time_since_last_request = time.time() - last_request_time
@@ -77,4 +77,10 @@ def call_openai_with_throttling(prompt):
         time.sleep(REQUEST_INTERVAL - time_since_last_request)
 
     last_request_time = time.time()
-    return call_openai(prompt)  # Call OpenAI with retry logic
+
+    try:
+        return call_openai(prompt)  # Call OpenAI with retry logic
+    except openai.error.RateLimitError:
+        print("⚠️ Rate limit hit! Increasing interval to prevent further 429 errors.")
+        REQUEST_INTERVAL += 2  # Increase delay dynamically
+        return None

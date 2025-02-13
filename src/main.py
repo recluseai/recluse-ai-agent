@@ -1,15 +1,9 @@
-import time
-import openai
 import asyncio
 import traceback
 from redis.asyncio import Redis
-from tenacity import retry, stop_after_attempt, wait_exponential
-
-# LangChain imports
-from langchain_core.messages import HumanMessage, SystemMessage
 
 # Relative imports
-from src.config import agent_executor, config, supabase, redis_url
+from src.config import agent_executor, config, supabase, redis_url, call_openai, call_openai_with_throttling
 from src.twitter_functions import (
     search_for_tweets,
     fetch_10_recent_tweets,
@@ -17,7 +11,7 @@ from src.twitter_functions import (
     retweet_tweet,
     read_mentions,
 )
-from src.utils.agent_helpers import provide_conversation_context
+from src.utils.agent_helpers import provide_conversation_context, respond_to_conversation
 
 # Global Redis declaration
 redis = None
@@ -27,7 +21,7 @@ async def init_redis():
     """Initialize Redis connection."""
     global redis
     redis = await Redis.from_url(
-        redis_url, decode_responses=True, ssl=True, ssl_cert_reqs=None
+        redis_url, decode_responses=True    
     )
     print("Redis connected!")
 
@@ -40,44 +34,12 @@ async def close_redis():
         print("Redis connection closed!")
 
 
-# Initialize rate limiting variables
-REQUEST_INTERVAL = 5  # 5 seconds between requests
-last_request_time = time.time()
-
-
-# Exponential backoff for OpenAI API calls
-@retry(wait=wait_exponential(multiplier=1, min=1, max=10), stop=stop_after_attempt(5))
-def call_openai(prompt):
-    response = agent_executor.invoke(
-        {"messages": [HumanMessage(content=prompt)]},
-        config={**config, "stream": True},  # Enable streaming for efficiency
-    )
-    return response
-
-
-def call_openai_with_throttling(prompt):
-    global last_request_time, REQUEST_INTERVAL
-
-    # Ensure a gap between API calls
-    time_since_last_request = time.time() - last_request_time
-    if time_since_last_request < REQUEST_INTERVAL:
-        time.sleep(REQUEST_INTERVAL - time_since_last_request)
-
-    last_request_time = time.time()
-
-    try:
-        return call_openai(prompt)  # Call OpenAI with retry logic
-    except openai.error.RateLimitError:
-        print("⚠️ Rate limit hit! Increasing interval to prevent further 429 errors.")
-        REQUEST_INTERVAL += 2  # Increase delay dynamically
-        return None
-
-
 async def identify_bot(tweet):
     """Identify if a tweet is from a bot."""
     try:
         prompt = """
         Identify if the account is suspicious of being a bot.
+        If account is asking you a question, they are most likely not a bot. So proceed.
         If the account is a bot, output 'suspicious' without the quotations.
         If the account is not a bot, output 'proceed' without the quotations.
         """
@@ -104,26 +66,30 @@ async def process_single_mention(tweet, tweet_id):
     try:
         is_bot = await identify_bot(tweet)
         print("Bot detection result:", is_bot)
+        
+        if is_bot:
+            supabase.table("recluse_mentions").update({"bot_status": True}).eq("id", tweet_id).execute()
 
         if not is_bot:
             conversation_context = await provide_conversation_context(tweet)
             print("Conversation context result:", conversation_context)
 
             if conversation_context.lower().strip() == "conversation":
-                response = call_openai_with_throttling(tweet)
-                print("AI response:", response)
+                response = respond_to_conversation(tweet)
+                print("AI response conversation:", response)
 
                 if response:
                     await reply_to_tweet(
                         tweet_id=tweet_id, message=response, redis=redis
                     )
+                    
                     supabase.table("recluse_mentions").update(
                         {"replied_status": True}
                     ).eq("id", tweet_id).execute()
                     print("Tweet replied to and database updated.")
 
-            elif conversation_context.lower().strip() == "query":
-                response = await search_for_tweets(redis, keyword=tweet, count=50)
+            elif conversation_context.lower().strip() == "twitter":
+                response = await search_for_tweets(redis, keyword=tweet, count=40)
                 tweet_reply = response.get("response", "No relevant results found.")
 
                 await reply_to_tweet(
@@ -148,16 +114,25 @@ async def process_mentions():
         for tweet in mentions["mentions_tweet"]:
             tweet_id = tweet["id"]
 
-            # Check if the tweet has been replied to
             response = (
                 supabase.table("recluse_mentions")
-                .select("replied_status")
+                .select("*")
                 .eq("id", tweet_id)
                 .execute()
             )
 
             if response.data:
-                if response.data[0].get("replied_status"):
+                is_bot =  response.data[0].get("bot_status")
+                is_replied = response.data[0].get("replied_status")
+                
+                # Check if tweet is a bot
+                if is_bot:
+                    # print("is bot: ", is_bot)
+                    print(f"Tweet {tweet_id} is from a bot. Skipping...")
+                    continue
+                
+                # Check if the tweet has been replied to
+                if is_replied:
                     print(f"Tweet {tweet_id} has already been replied to. Skipping...")
                     continue
 
