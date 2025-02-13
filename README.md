@@ -1,3 +1,5 @@
+![Banner](https://pbs.twimg.com/profile_banners/1881212535312957440/1738775511/1500x500)
+
 # RecluseAI - Open Source Twitter AI Agent
 
 RecluseAI is an intelligent, autonomous Twitter agent that engages with mentions in real time. It can analyze tweets, detect bot activity, and generate human-like responses based on the conversation context. Powered by OpenAI, Redis, LangChain, and Supabase, this AI agent enhances your Twitter presence with intelligent automation.
