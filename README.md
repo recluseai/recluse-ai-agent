@@ -58,10 +58,6 @@ source venv/bin/activate
 
 # Install dependencies
 pip install -r requirements.txt
-
-# Set up environment variables
-cp .env.example .env
-# Edit .env file with your API keys and database credentials
 ```
 
 ## ▶️ Running the AI Agent
